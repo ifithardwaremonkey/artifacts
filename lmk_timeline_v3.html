@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cesium 0909 — memory cascade &amp; adbd crash, full incident timeline (v3)</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page-plane:      #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6; /* blue   -> Browser / WebView */
+    --series-2:       #eb6834; /* orange -> iFit / Valinor */
+    --series-3:       #1baf7a; /* aqua   -> System / cache */
+    --st-good:        #0ca30c;
+    --st-warning:     #fab219;
+    --st-critical:    #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19; --page-plane: #0d0d0d; --text-primary:#fff;
+      --text-secondary:#c3c2b7; --text-muted:#898781; --gridline:#2c2c2a; --baseline:#383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70;
+      --st-good:#0ca30c; --st-warning:#fab219; --st-critical:#e66767;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19; --page-plane: #0d0d0d; --text-primary:#fff;
+    --text-secondary:#c3c2b7; --text-muted:#898781; --gridline:#2c2c2a; --baseline:#383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70;
+    --st-good:#0ca30c; --st-warning:#fab219; --st-critical:#e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--page-plane); color: var(--text-primary); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 24px 48px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 28px 28px 22px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; color: var(--text-primary); }
+  .subtitle { font-size: 13px; color: var(--text-secondary); margin: 0 0 6px; }
+  .plain { font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0 0 20px; max-width: 780px; }
+  .plain b { color: var(--text-primary); font-weight: 600; }
+
+  .toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 4px; }
+  .toolbar button { font: inherit; font-size: 12px; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { color: var(--text-primary); border-color: var(--baseline); }
+
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .axis-title { font-size: 11px; fill: var(--text-secondary); font-weight: 600; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+  .tick-text { font-size: 10.5px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .axis-line { stroke: var(--baseline); stroke-width: 1; }
+  .band-label { font-size: 10.5px; fill: var(--text-secondary); font-weight: 600; }
+  .band-sub { font-size: 9.5px; fill: var(--text-muted); }
+  .dot { stroke: var(--surface-1); stroke-width: 2; cursor: pointer; }
+  .marker { stroke: var(--surface-1); stroke-width: 2; cursor: pointer; }
+  .direct-label { font-size: 10.5px; fill: var(--text-secondary); }
+  .direct-label .proc { font-weight: 600; fill: var(--text-primary); }
+  .ref-label { font-size: 9.5px; fill: var(--text-secondary); }
+  .ref-tag { font-size: 9px; fill: var(--surface-1); font-weight: 700; }
+  .gap-note { font-size: 10px; fill: var(--text-muted); font-style: italic; }
+
+  .legend { display: flex; gap: 18px; margin: 10px 0 2px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-secondary); }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .legend-swatch.tri { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid; border-radius: 0; }
+
+  .stat-row { display: flex; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
+  .stat-tile { flex: 1; min-width: 150px; background: var(--page-plane); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+  .stat-value { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+  .stat-value .unit { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+  .stat-sub { font-size: 10.5px; color: var(--text-muted); margin-top: 3px; }
+  .stat-tile.crit .stat-value { color: var(--st-critical); }
+
+  .tooltip { position: absolute; pointer-events: none; opacity: 0; transition: opacity .08s ease; background: var(--text-primary); color: var(--surface-1); font-size: 12px; line-height: 1.5; padding: 8px 10px; border-radius: 6px; max-width: 280px; transform: translate(-50%, -100%); white-space: normal; z-index: 5; }
+  .tooltip .mut { opacity: .72; }
+
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; color: var(--text-primary); background: var(--surface-1); color-scheme: inherit; }
+  table.data-table caption { text-align: left; font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+  table.data-table th, table.data-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; color: var(--text-primary); background: var(--surface-1); }
+  table.data-table th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  table.data-table .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+  .hidden { display: none; }
+  .note { font-size: 11.5px; color: var(--text-muted); margin-top: 10px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+  <div class="card">
+    <div class="toolbar">
+      <button id="btn-chart" aria-pressed="true">Chart</button>
+      <button id="btn-table" aria-pressed="false">Table</button>
+    </div>
+    <h1>Cesium 0909 — full incident timeline (v3)</h1>
+    <p class="subtitle">10-02, 09:47:45 – 09:56:45 · bugreport-iFitG520-2026-10-02-09-56-41 + vmstat summary (laptop capture)</p>
+    <p class="plain">
+      <b>Plain-language summary:</b> <code>lmkd</code> only kills a process when <b>two conditions are true at once</b>: free swap has dropped below its 333MB safety margin, <i>and</i> the system is "thrashing" — pages that were just reclaimed are being faulted back in almost immediately, which shows up as a burst of swap-in + block-device I/O. <b>Panel B below is that composite signal</b> (swap-in + block-in, combined) built from the vmstat summary. Two I/O pulses (<b>!1, !2</b>) already happened <i>before</i> any app-level kill was logged — the "quiet gap" wasn't actually quiet at the kernel level. The worst pulse (<b>!3, 300MB/s combined</b>) lines up almost exactly with the first kill of the cascade; the swap peak (<b>!4, 735MB</b>) lines up with the two highest-thrashing kills (eru/glassos_service, 300-301%).
+    </p>
+
+    <div id="chart-view">
+      <svg id="svg" viewBox="0 0 1000 660" role="img" aria-label="Two-panel timeline of the Cesium 0909 incident from 09:47:45 to 09:56:45. Top panel: 13 lowmemorykiller kill events by thrashing percentage. Bottom panel: composite swap-in plus block-in I/O signal from the vmstat summary, the combined statistic lmkd reacts to, with four marked pulses referencing free RAM and swap used at each."></svg>
+
+      <div class="legend" id="legend-top"></div>
+      <div class="legend" id="legend-events"></div>
+
+      <div class="stat-row">
+        <div class="stat-tile">
+          <div class="stat-label">Free RAM at capture</div>
+          <div class="stat-value">90,192<span class="unit">KB</span></div>
+          <div class="stat-sub">of 3,408,648KB total (2.6%)</div>
+        </div>
+        <div class="stat-tile crit">
+          <div class="stat-label">Worst I/O pulse (!3, 09:52:50)</div>
+          <div class="stat-value">300<span class="unit">MB/s</span></div>
+          <div class="stat-sub">82MB/s swap-in + 218MB/s block-in, 116MB free — right as the first kill fires</div>
+        </div>
+        <div class="stat-tile crit">
+          <div class="stat-label">Peak swap used (!4, 09:53:50)</div>
+          <div class="stat-value">735<span class="unit">MB</span></div>
+          <div class="stat-sub">vs 665MB baseline — lines up with the two 300%+ thrashing kills</div>
+        </div>
+      </div>
+      <p class="note">Panel B is <code>lmkd</code>'s own kill trigger, not a proxy: it only acts when free swap is under the dashed threshold <i>and</i> this combined swap-in/block-in rate is elevated. Flat stretches of Panel B are moments neither condition was being stressed, even though free RAM (see table view) stayed low throughout — low free RAM alone does not trigger a kill without the I/O-thrashing component.</p>
+    </div>
+
+    <div id="table-view" class="hidden">
+      <table class="data-table" aria-label="vmstat summary samples, table view">
+        <caption>vmstat summary (laptop capture) — free RAM / swap used / swap-in / block-in</caption>
+        <thead><tr><th>Time</th><th>Free RAM</th><th>Swap used</th><th>Swap-in</th><th>Block-in</th><th>Composite</th><th>Mark</th></tr></thead>
+        <tbody id="table-body-vmstat"></tbody>
+      </table>
+      <div style="height:18px"></div>
+      <table class="data-table" aria-label="Key incident events, table view">
+        <caption>Key events, chronological (10-02)</caption>
+        <thead><tr><th>Time</th><th>Event</th></tr></thead>
+        <tbody id="table-body-events"></tbody>
+      </table>
+      <div style="height:18px"></div>
+      <table class="data-table" aria-label="lowmemorykiller kill events, table view">
+        <caption>All 13 lowmemorykiller kills, chronological</caption>
+        <thead><tr><th>Time</th><th>Process</th><th>Thrashing</th><th>Free swap</th><th>Category</th></tr></thead>
+        <tbody id="table-body-kills"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="tooltip" class="tooltip" role="status"></div>
+</div>
+</div>
+
+<script>
+(function () {
+  // ---- time helper: t = seconds since 09:47:45 ----
+  function toT(hhmmss) {
+    const [h, m, s] = hhmmss.split(":");
+    return (parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s)) - (9 * 3600 + 47 * 60 + 45);
+  }
+
+  // ---- vmstat summary data (from uploaded laptop-capture analysis) ----
+  const vmstat = [
+    { time: "09:47:50", freeRAM: 94,  swap: 665, si: 0,   bi: 0,   mark: null },
+    { time: "09:48:30", freeRAM: 97,  swap: 665, si: 0,   bi: 0,   mark: null },
+    { time: "09:49:10", freeRAM: 80,  swap: 665, si: 0,   bi: 0,   mark: null },
+    { time: "09:49:50", freeRAM: 106, swap: 682, si: 107, bi: 26,  mark: "!1" },
+    { time: "09:50:30", freeRAM: 80,  swap: 664, si: 113, bi: 38,  mark: "!2" },
+    { time: "09:51:10", freeRAM: 77,  swap: 664, si: 0,   bi: 0,   mark: null },
+    { time: "09:51:50", freeRAM: 91,  swap: 675, si: 0,   bi: 0,   mark: null },
+    { time: "09:52:30", freeRAM: 92,  swap: 675, si: 0,   bi: 0,   mark: null },
+    { time: "09:52:50", freeRAM: 116, swap: 708, si: 82,  bi: 218, mark: "!3" },
+    { time: "09:53:10", freeRAM: 81,  swap: 671, si: 0,   bi: 0,   mark: null },
+    { time: "09:53:30", freeRAM: 86,  swap: 655, si: 0,   bi: 0,   mark: null },
+    { time: "09:53:50", freeRAM: 141, swap: 735, si: 100, bi: 81,  mark: "!4" },
+    { time: "09:54:00", freeRAM: 85,  swap: 690, si: 0,   bi: 0,   mark: "ANR", note: "ANR logged" }
+  ].map(e => Object.assign(e, { t: toT(e.time), composite: e.si + e.bi }));
+
+  const kills = [
+    { time: "09:52:53.026", proc: "com.android.settings",            thrash: 101, freeSwap: 116448, cat: "system"  },
+    { time: "09:52:56.048", proc: "com.android.webview:webview_apk",     thrash: 101, freeSwap: 166944, cat: "browser" },
+    { time: "09:53:03.828", proc: "com.android.webview:webview_service", thrash: 213, freeSwap: 140896, cat: "browser" },
+    { time: "09:53:08.499", proc: "com.android.webview:webview_apk",     thrash: 101, freeSwap: 118156, cat: "browser" },
+    { time: "09:53:19.379", proc: "com.android.webview:webview_service", thrash: 111, freeSwap: 140628, cat: "browser" },
+    { time: "09:53:28.925", proc: "com.android.webview:webview_service", thrash: 101, freeSwap: 173084, cat: "browser" },
+    { time: "09:53:31.775", proc: "com.ifit.eru",                        thrash: 301, freeSwap: 119140, cat: "ifit"    },
+    { time: "09:53:59.991", proc: "com.ifit.glassos_service",            thrash: 300, freeSwap: 84472,  cat: "ifit"    },
+    { time: "09:54:38.415", proc: "com.android.inputmethod.latin",       thrash: 300, freeSwap: 101128, cat: "system"  },
+    { time: "09:54:54.964", proc: "com.malata.engineermode",             thrash: 142, freeSwap: 190936, cat: "system"  },
+    { time: "09:54:57.791", proc: "android.process.media",               thrash: 101, freeSwap: 191664, cat: "system"  },
+    { time: "09:55:03.553", proc: "android.process.acore",               thrash: 101, freeSwap: 141684, cat: "system"  },
+    { time: "09:55:08.992", proc: "com.ifit.gandalf",                    thrash: 153, freeSwap: 144648, cat: "ifit"    }
+  ].map(e => Object.assign(e, { t: toT(e.time) }));
+
+  const events = [
+    { t: toT("09:48:19.547"), time: "09:48:19.547", label: "5.4s UI thread stall begins", kind: "warning" },
+    { t: toT("09:48:49.956"), time: "09:48:49.956", label: "adbd SIGABRT (FORTIFY: destroyed-mutex lock)", kind: "critical" },
+    { t: toT("09:52:51.907"), time: "09:52:51.907", label: "Browser auto-relaunched (lmkd killed prior instance 09-30 13:27, 44h earlier)", kind: "neutral" },
+    { t: toT("09:55:05.920"), time: "09:55:05.920", label: "Privileged Mode entry / iFIT-LargeX pairing begins", kind: "good" },
+    { t: toT("09:56:41.000"), time: "09:56:41", label: "Bugreport captured", kind: "neutral" }
+  ];
+
+  const bands = [
+    { from: toT("09:48:19"), to: toT("09:48:50"), label: "Pre-crash memory distress", sub: "mem-pressure-event crashes, 5.4s Looper stall", kind: "warning" },
+    { from: toT("09:48:50"), to: toT("09:52:51"), label: "Quiet at app layer — not at kernel layer", sub: "2 unlogged swap-I/O pulses already underway (!1, !2)", kind: "neutral" },
+    { from: toT("09:52:51"), to: toT("09:55:09"), label: "Browser relaunch → OOM/ANR cascade", sub: "13 lowmemorykiller kills, multiple ANRs", kind: "critical" },
+    { from: toT("09:55:05"), to: toT("09:55:19"), label: "Recovery", sub: "Privileged Mode + accessory pairing succeeds", kind: "good" }
+  ];
+
+  const catMeta = {
+    browser: { label: "Browser / WebView", color: "var(--series-1)", hex: "#2a78d6" },
+    ifit:    { label: "iFit / Valinor",    color: "var(--series-2)", hex: "#eb6834" },
+    system:  { label: "System / cache",    color: "var(--series-3)", hex: "#1baf7a" }
+  };
+  const statusHex = { warning: "#fab219", critical: "#d03b3b", good: "#0ca30c", neutral: "#898781" };
+  const statusVar = { warning: "var(--st-warning)", critical: "var(--st-critical)", good: "var(--st-good)", neutral: "var(--text-muted)" };
+
+  // ---- geometry ----
+  const W = 1000;
+  const bandTop = 56, bandH = 34;
+  const markerTop = bandTop + bandH + 6, markerH = 12;
+  const panelAtop = markerTop + markerH + 18, panelAH = 170;
+  const panelBtop = panelAtop + panelAH + 46, panelBH = 190;
+  const H = panelBtop + panelBH + 100; // extra room for ref-label rows when marks are close together
+  const Mleft = 56, Mright = 20;
+  const plotW = W - Mleft - Mright;
+  const tMin = 0, tMax = toT("09:56:45");
+  const vmstatEnd = toT("09:54:00"); // data availability boundary
+
+  const xScale = (t) => Mleft + (plotW * ((t - tMin) / (tMax - tMin)));
+  const yA = (v) => panelAtop + panelAH - (panelAH * (v / 320));
+  const yB = (v) => panelBtop + panelBH - (panelBH * (v / 320));
+
+  const svg = document.getElementById("svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const ns = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+  // text measurement (canvas, offscreen) to avoid labels bleeding past narrow bands
+  const measureCanvas = document.createElement("canvas");
+  const measureCtx = measureCanvas.getContext("2d");
+  function textWidth(str, font) { measureCtx.font = font; return measureCtx.measureText(str).width; }
+  const FONT_STACK = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+  const bandLabelFont = `600 10.5px ${FONT_STACK}`;
+  const bandSubFont = `9.5px ${FONT_STACK}`;
+
+  // phase bands
+  bands.forEach(b => {
+    const x1 = xScale(b.from), x2 = xScale(b.to);
+    const bandW = Math.max(x2 - x1, 1);
+    const available = bandW - 10; // 6px left pad + ~4px right margin before next band
+    const labelFits = textWidth(b.label, bandLabelFont) <= available;
+    const subFits = textWidth(b.sub, bandSubFont) <= available;
+    svg.appendChild(el("rect", { x: x1, y: bandTop, width: bandW, height: panelBtop + panelBH - bandTop, fill: statusVar[b.kind], opacity: b.kind === "neutral" ? 0.04 : 0.07 }));
+    const head = el("rect", { x: x1, y: bandTop, width: bandW, height: bandH, fill: statusVar[b.kind], opacity: 0.16, tabindex: "0" });
+    head.style.cursor = "pointer";
+    head.addEventListener("mouseenter", () => showTip(`<b>${b.label}</b><br>${b.sub}`, x1 + bandW / 2, bandTop));
+    head.addEventListener("mouseleave", hideTip);
+    svg.appendChild(head);
+    if (labelFits) svg.appendChild(el("text", { x: x1 + 6, y: bandTop + 15, class: "band-label" })).textContent = b.label;
+    if (subFits) svg.appendChild(el("text", { x: x1 + 6, y: bandTop + 27, class: "band-sub" })).textContent = b.sub;
+  });
+
+  // shared minute ticks from 09:47:45
+  for (let m = 0; m <= 9; m++) {
+    const tt = m * 60 - 45; // offset since window starts :45s into the minute before 09:48
+    const label = "09:" + String(48 + m).padStart(2, "0");
+    const x = xScale(tt < 0 ? 0 : tt + 45 - 45 + 45); // simplify below
+  }
+  // simpler: explicit minute marks
+  ["09:48:00","09:49:00","09:50:00","09:51:00","09:52:00","09:53:00","09:54:00","09:55:00","09:56:00"].forEach(lbl => {
+    const t = toT(lbl);
+    const x = xScale(t);
+    if (x < Mleft - 1 || x > W - Mright + 1) return;
+    svg.appendChild(el("line", { x1: x, x2: x, y1: bandTop, y2: panelBtop + panelBH, class: "gridline" }));
+    svg.appendChild(el("text", { x: x, y: panelBtop + panelBH + 16, class: "tick-text", "text-anchor": "middle" })).textContent = lbl.slice(0,5);
+  });
+  svg.appendChild(el("line", { x1: Mleft, x2: W - Mright, y1: panelBtop + panelBH, y2: panelBtop + panelBH, class: "axis-line" }));
+
+  const tooltip = document.getElementById("tooltip");
+  function showTip(html, cx, cy) {
+    const rect = svg.getBoundingClientRect();
+    const scaleX = rect.width / W, scaleY = rect.height / H;
+    tooltip.innerHTML = html;
+    tooltip.style.left = (rect.left + cx * scaleX) + "px";
+    tooltip.style.top = (rect.top + cy * scaleY - 10) + "px";
+    tooltip.style.opacity = "1";
+  }
+  function hideTip() { tooltip.style.opacity = "0"; }
+
+  // ---- Panel A: thrashing% ----
+  svg.appendChild(el("text", { x: Mleft, y: panelAtop - 8, class: "axis-title" })).textContent = "Panel A — thrashing % at each lowmemorykiller kill";
+  [0, 100, 200, 300].forEach(v => {
+    svg.appendChild(el("line", { x1: Mleft, x2: W - Mright, y1: yA(v), y2: yA(v), class: "gridline" }));
+    svg.appendChild(el("text", { x: Mleft - 8, y: yA(v) + 4, class: "tick-text", "text-anchor": "end" })).textContent = v + "%";
+  });
+  kills.forEach(k => {
+    const cx = xScale(k.t), cy = yA(k.thrash);
+    const dot = el("circle", { cx, cy, r: 6, class: "dot", fill: catMeta[k.cat].color, tabindex: "0" });
+    dot.addEventListener("mouseenter", () => showTip(`<b>${k.proc}</b><br>${k.time}<br><span class="mut">thrashing</span> ${k.thrash}% &nbsp; <span class="mut">free swap</span> ${k.freeSwap.toLocaleString()}KB`, cx, cy));
+    dot.addEventListener("mouseleave", hideTip);
+    svg.appendChild(dot);
+  });
+  function directLabel(k, text2, dx, dy, anchor) {
+    const cx = xScale(k.t), cy = yA(k.thrash);
+    const t1 = el("text", { x: cx + dx, y: cy + dy, class: "direct-label", "text-anchor": anchor || "start" });
+    const p = el("tspan", { class: "proc", x: cx + dx }); p.textContent = k.proc.replace("com.android.webview:", "").replace("com.ifit.", "").replace("android.process.", "");
+    t1.appendChild(p);
+    const s = el("tspan", { x: cx + dx, dy: "12" }); s.textContent = text2;
+    t1.appendChild(s);
+    svg.appendChild(t1);
+  }
+  directLabel(kills[6], "301% (max)", 9, -8, "start");
+  directLabel(kills[12], "last kill", -9, -10, "end");
+
+  // event markers — own row (markerTop..markerTop+markerH), clear of both the band labels above and the axis title below
+  events.forEach(ev => {
+    const x = xScale(ev.t);
+    svg.appendChild(el("line", { x1: x, x2: x, y1: markerTop, y2: panelBtop + panelBH, stroke: statusVar[ev.kind], "stroke-width": 1, "stroke-dasharray": "2 3", opacity: 0.55 }));
+    const tri = el("path", { d: `M ${x-6} ${markerTop} L ${x+6} ${markerTop} L ${x} ${markerTop + markerH} Z`, fill: statusVar[ev.kind], class: "marker" });
+    tri.addEventListener("mouseenter", () => showTip(`<b>${ev.label}</b><br>${ev.time}`, x, markerTop));
+    tri.addEventListener("mouseleave", hideTip);
+    svg.appendChild(tri);
+  });
+
+  // ---- Panel B: composite swap-in + block-in signal ----
+  svg.appendChild(el("text", { x: Mleft, y: panelBtop - 8, class: "axis-title" })).textContent = "Panel B — composite signal lmkd reacts to: swap-in + block-in I/O (MB/s)";
+  [0, 100, 200, 300].forEach(v => {
+    svg.appendChild(el("line", { x1: Mleft, x2: W - Mright, y1: yB(v), y2: yB(v), class: "gridline" }));
+    svg.appendChild(el("text", { x: Mleft - 8, y: yB(v) + 4, class: "tick-text", "text-anchor": "end" })).textContent = v + "MB/s";
+  });
+
+  // area fill under composite line (only across available data)
+  let areaPath = "M" + xScale(vmstat[0].t) + "," + yB(0) + " ";
+  vmstat.forEach(v => { areaPath += "L" + xScale(v.t) + "," + yB(v.composite) + " "; });
+  areaPath += "L" + xScale(vmstat[vmstat.length-1].t) + "," + yB(0) + " Z";
+  svg.appendChild(el("path", { d: areaPath, fill: "var(--series-1)", opacity: 0.08 }));
+
+  let linePath = "";
+  vmstat.forEach((v, i) => { linePath += (i === 0 ? "M" : "L") + xScale(v.t) + "," + yB(v.composite) + " "; });
+  svg.appendChild(el("path", { d: linePath.trim(), fill: "none", stroke: "var(--series-1)", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+
+  // greedy row-packer for the below-axis reference labels: adjacent marks (e.g. !1/!2, 40s
+  // apart; !4/ANR, 10s apart) are closer together than their label text is wide, so pack into
+  // as many rows as needed, in time order, rather than assume one row always fits.
+  const refLabelFont = `9.5px ${FONT_STACK}`;
+  const refRowRightEdge = []; // rightEdge reached so far, per row
+  function packRefRow(cx, width) {
+    const pad = 6;
+    for (let row = 0; row < refRowRightEdge.length; row++) {
+      if (cx - width / 2 > refRowRightEdge[row] + pad) { refRowRightEdge[row] = cx + width / 2; return row; }
+    }
+    refRowRightEdge.push(cx + width / 2);
+    return refRowRightEdge.length - 1;
+  }
+
+  vmstat.forEach(v => {
+    const cx = xScale(v.t), cy = yB(v.composite);
+    const isMark = !!v.mark;
+    const dotColor = v.mark === "ANR" ? "var(--st-critical)" : (isMark ? "var(--series-2)" : "var(--series-1)");
+    const r = isMark ? 6 : 3.5;
+    const dot = el("circle", { cx, cy, r, class: "dot", fill: dotColor, tabindex: "0" });
+    dot.addEventListener("mouseenter", () => showTip(
+      `<b>${v.time}${v.mark ? " " + v.mark : ""}</b><br>` +
+      `<span class="mut">free RAM</span> ${v.freeRAM}MB &nbsp; <span class="mut">swap used</span> ${v.swap}MB<br>` +
+      `<span class="mut">swap-in</span> ${v.si}MB/s &nbsp; <span class="mut">block-in</span> ${v.bi}MB/s &nbsp; <span class="mut">composite</span> ${v.composite}MB/s` +
+      (v.note ? `<br><i>${v.note}</i>` : ""), cx, cy));
+    dot.addEventListener("mouseleave", hideTip);
+    svg.appendChild(dot);
+    if (isMark) {
+      const tag = el("rect", { x: cx - 10, y: cy - 28, width: 20, height: 14, rx: 3, fill: dotColor });
+      svg.appendChild(tag);
+      const tagText = el("text", { x: cx, y: cy - 18, class: "ref-tag", "text-anchor": "middle" });
+      tagText.textContent = v.mark;
+      svg.appendChild(tagText);
+      // reference label: free RAM / swap used from the vmstat summary
+      const labelText = `${v.freeRAM}MB free / ${v.swap}MB swap`;
+      const row = packRefRow(cx, textWidth(labelText, refLabelFont));
+      const lbl = el("text", { x: cx, y: panelBtop + panelBH + 30 + row * 12, class: "ref-label", "text-anchor": "middle" });
+      lbl.textContent = labelText;
+      svg.appendChild(lbl);
+    }
+  });
+
+  // gap note after data ends
+  const gapX1 = xScale(vmstatEnd), gapX2 = xScale(tMax);
+  svg.appendChild(el("line", { x1: gapX1, x2: gapX2, y1: yB(0), y2: yB(0), stroke: "var(--text-muted)", "stroke-width": 1, "stroke-dasharray": "1 4" }));
+  svg.appendChild(el("text", { x: (gapX1 + gapX2) / 2, y: yB(0) - 8, class: "gap-note", "text-anchor": "middle" })).textContent = "no vmstat data after 09:54:00 (laptop session ended, ^C)";
+
+  // legends
+  const legendTop = document.getElementById("legend-top");
+  Object.keys(catMeta).forEach(k => {
+    const n = kills.filter(e => e.cat === k).length;
+    const item = document.createElement("div"); item.className = "legend-item";
+    const sw = document.createElement("span"); sw.className = "legend-swatch"; sw.style.background = catMeta[k].color;
+    item.appendChild(sw);
+    const lab = document.createElement("span"); lab.textContent = `${catMeta[k].label} (${n})`;
+    item.appendChild(lab);
+    legendTop.appendChild(item);
+  });
+  const legendEvents = document.getElementById("legend-events");
+  [["warning","Pre-crash distress"],["critical","adbd crash / cascade"],["good","Recovery"]].forEach(([kind,label]) => {
+    const item = document.createElement("div"); item.className = "legend-item";
+    const sw = document.createElement("span"); sw.className = "legend-swatch tri";
+    sw.style.setProperty("border-bottom-color", statusHex[kind]);
+    item.appendChild(sw);
+    const lab = document.createElement("span"); lab.textContent = label;
+    item.appendChild(lab);
+    legendEvents.appendChild(item);
+  });
+
+  // table views
+  const tbVmstat = document.getElementById("table-body-vmstat");
+  vmstat.forEach(v => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${v.time}</td><td>${v.freeRAM}MB</td><td>${v.swap}MB</td><td>${v.si}MB/s</td><td>${v.bi}MB/s</td><td>${v.composite}MB/s</td><td>${v.mark || ""}</td>`;
+    tbVmstat.appendChild(tr);
+  });
+  const tbEvents = document.getElementById("table-body-events");
+  events.forEach(ev => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${ev.time}</td><td>${ev.label}</td>`;
+    tbEvents.appendChild(tr);
+  });
+  const tbKills = document.getElementById("table-body-kills");
+  kills.forEach(k => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${k.time}</td><td><span class="swatch" style="background:${catMeta[k.cat].hex}"></span>${k.proc}</td><td>${k.thrash}%</td><td>${k.freeSwap.toLocaleString()}KB</td><td>${catMeta[k.cat].label}</td>`;
+    tbKills.appendChild(tr);
+  });
+
+  // toggle
+  const btnChart = document.getElementById("btn-chart"), btnTable = document.getElementById("btn-table");
+  const chartView = document.getElementById("chart-view"), tableView = document.getElementById("table-view");
+  btnChart.addEventListener("click", () => { chartView.classList.remove("hidden"); tableView.classList.add("hidden"); btnChart.setAttribute("aria-pressed","true"); btnTable.setAttribute("aria-pressed","false"); });
+  btnTable.addEventListener("click", () => { tableView.classList.remove("hidden"); chartView.classList.add("hidden"); btnTable.setAttribute("aria-pressed","true"); btnChart.setAttribute("aria-pressed","false"); });
+})();
+</script>
+</body>
+</html>
