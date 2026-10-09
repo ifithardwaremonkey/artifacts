@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cesium Uptime Timeline</title>
+<style>
+  :root { color-scheme: light dark; }
+  .viz-root {
+    --surface-1:#fcfcfb; --surface-2:#f3f2ee; --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#6f6d68;
+    --grid:rgba(11,11,11,0.09); --axis:rgba(11,11,11,0.35); --band:rgba(11,11,11,0.05);
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s7:#6250d6; --warn:#b4540a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      --surface-1:#1a1a19; --surface-2:#242422; --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#a29f96;
+      --grid:rgba(255,255,255,0.10); --axis:rgba(255,255,255,0.40); --band:rgba(255,255,255,0.06);
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s7:#9085e9; --warn:#e8903f;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    --surface-1:#1a1a19; --surface-2:#242422; --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#a29f96;
+    --grid:rgba(255,255,255,0.10); --axis:rgba(255,255,255,0.40); --band:rgba(255,255,255,0.06);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s7:#9085e9; --warn:#e8903f;
+  }
+  body { margin:0; background:#fcfcfb; font-family: system-ui,-apple-system,"Segoe UI",sans-serif; }
+  @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) body { background:#1a1a19; } }
+  :root[data-theme="dark"] body { background:#1a1a19; }
+  .viz-root { position:relative; background:var(--surface-1); color:var(--text-primary); padding:24px 16px 40px; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; font-weight:650; color:var(--text-primary); }
+  .sub { font-size:13.5px; color:var(--text-secondary); margin:0 0 18px; line-height:1.5; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:22px; }
+  .tile { background:var(--surface-2); border-radius:10px; padding:12px 14px; }
+  .tile .k { font-size:11.5px; color:var(--text-muted); letter-spacing:.02em; text-transform:uppercase; }
+  .tile .v { font-size:24px; font-weight:650; margin:2px 0; color:var(--text-primary); }
+  .tile .n { font-size:12px; color:var(--text-secondary); line-height:1.4; }
+  h2 { font-size:15px; margin:26px 0 2px; color:var(--text-primary); font-weight:650; }
+  .cap { font-size:12.5px; color:var(--text-secondary); margin:0 0 6px; line-height:1.5; }
+  svg { width:100%; height:auto; display:block; overflow:visible; }
+  svg text { fill:var(--text-secondary); font-size:11.5px; font-family:inherit; }
+  svg text.p { fill:var(--text-primary); }
+  svg text.m { fill:var(--text-muted); }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--text-secondary); margin:4px 0 2px; }
+  .legend i { display:inline-block; width:12px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+  #tip { position:absolute; pointer-events:none; background:var(--surface-1); color:var(--text-primary); border:1px solid var(--axis);
+         border-radius:8px; padding:8px 10px; font-size:12px; line-height:1.45; max-width:300px; display:none; z-index:5; box-shadow:0 2px 10px rgba(0,0,0,.18); }
+  #tip b { color:var(--text-primary); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; margin-top:8px; }
+  .card { background:var(--surface-2); border-radius:10px; padding:14px 16px; }
+  .card h3 { font-size:13.5px; margin:0 0 6px; color:var(--text-primary); }
+  .card p { font-size:12.5px; margin:0; color:var(--text-secondary); line-height:1.5; }
+  .card code { color:var(--text-primary); font-size:12px; }
+  button { font:inherit; font-size:12.5px; color:var(--text-primary); background:var(--surface-2); border:1px solid var(--axis); border-radius:8px; padding:6px 12px; cursor:pointer; }
+  table { border-collapse:collapse; font-size:12px; margin-top:10px; width:100%; color:var(--text-primary); background:var(--surface-1); }
+  th,td { border-bottom:1px solid var(--grid); padding:4px 8px; text-align:right; color:var(--text-primary); }
+  th:first-child,td:first-child { text-align:left; }
+  th { color:var(--text-secondary); font-weight:600; }
+  .foot { font-size:12px; color:var(--text-muted); margin-top:26px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+<div class="wrap">
+  <h1>Cesium 0909 — this boot's timeline (3 d 3 h, idle)</h1>
+  <p class="sub">Device clock (CDT). From the last power-on, 10-06 07:14:43 (an automatic <code>hang_detect</code> reboot), to the 10-09 10:42 bugreport. Sources: the bugreport's system log, event log and ActivityManager memory samples. Nothing here is from the earlier boot except where stated.</p>
+
+  <div class="tiles" id="tiles"></div>
+
+  <h2>A. Memory by category, sampled by ActivityManager every ~3 h</h2>
+  <p class="cap">Only the kernel's share grows. Cached app memory and free RAM drift down as the kernel takes pages. Dashed orange is a straight-line fit through the kernel samples (excluding the last point).</p>
+  <div class="legend"><span><i style="background:var(--s2)"></i>Kernel</span><span><i style="background:var(--s1)"></i>Cached apps</span><span><i style="background:var(--s3)"></i>Free</span><span class="m" id="lg-note"></span></div>
+  <svg id="svgA" viewBox="0 0 1000 300" role="img" aria-label="Kernel, cached and free memory over the 3-day boot"></svg>
+
+  <h2>B. What happened (and mostly, what didn't)</h2>
+  <p class="cap">The shaded span is the stretch with no touch input logged at all. Tick rows are periodic background activity (DND diamonds: filled = on at 22:00, hollow = off at 07:00); the right-hand marker is you at the tablet, expanded in panel D.</p>
+  <svg id="svgB" viewBox="0 0 1000 190" role="img" aria-label="Event lanes across the boot"></svg>
+
+  <h2>C. System log lines per hour (log scale)</h2>
+  <p class="cap">An idle tablet writes about 15 lines an hour here. The two hours on the right are the 10-09 session; the first is boot.</p>
+  <svg id="svgC" viewBox="0 0 1000 150" role="img" aria-label="Log lines per hour"></svg>
+
+  <h2>D. Zoom: 10-09 09:30 to 10:45, the only time anyone touched it</h2>
+  <p class="cap">Bars are <code>adbd</code> log lines per minute. The USB ADB connect/disconnect loop runs for about 7 minutes (10:35 to 10:42), starting when the debugging screens were opened and ending at the bugreport; it was not running during the idle days.</p>
+  <svg id="svgD" viewBox="0 0 1000 270" role="img" aria-label="Zoomed timeline of the 10-09 session"></svg>
+
+  <h2>Interesting things</h2>
+  <div class="cards" id="cards"></div>
+
+  <p style="margin-top:22px"><button id="tbtn" aria-expanded="false">Show memory samples as a table</button></p>
+  <div id="tbl"></div>
+
+  <p class="foot">Caveat on clocks: this device has no battery-backed RTC, so the first ~20 s of every boot are stamped with a stale saved time (here 10-05 21:38) until NTP corrects it at 07:14:58. Those lines are folded into "boot". MiB = 1,048,576 bytes. Memory figures come from the framework's <code>am_meminfo</code> event (bytes), which is a coarser measure than <code>/proc/slabinfo</code>; the two agree on the trend, not on exact values.</p>
+</div>
+<div id="tip"></div>
+</div>
+
+<script>
+const DATA = {"mem": [["10-06 07:34:54", 1307.1, 238.0, 118.8, 421.4, 752.5], ["10-06 10:42:30", 1329.7, 231.6, 109.3, 407.6, 754.7], ["10-06 13:42:31", 1333.1, 199.1, 108.2, 410.7, 754.9], ["10-06 17:10:31", 1333.0, 181.6, 108.2, 422.9, 754.7], ["10-06 20:12:31", 1338.4, 209.4, 113.1, 432.9, 755.0], ["10-06 23:15:01", 1338.7, 165.0, 112.1, 445.5, 754.9], ["10-07 02:42:30", 1339.1, 156.7, 112.1, 459.7, 754.9], ["10-07 05:42:37", 1339.5, 145.8, 111.6, 472.0, 754.9], ["10-07 09:12:30", 1344.2, 135.5, 112.6, 486.4, 755.1], ["10-07 12:12:31", 1344.1, 114.6, 111.9, 498.6, 755.0], ["10-07 15:42:30", 1344.5, 91.4, 111.9, 512.9, 755.0], ["10-07 18:42:31", 1309.7, 106.2, 111.8, 525.2, 755.0], ["10-07 22:12:30", 1311.6, 105.6, 112.2, 539.3, 754.9], ["10-08 01:12:30", 1278.2, 114.3, 111.8, 551.5, 755.1], ["10-08 04:37:21", 1278.3, 99.1, 111.8, 565.3, 755.0], ["10-08 07:42:30", 1278.9, 101.9, 111.5, 578.0, 755.1], ["10-08 11:00:00", 1246.7, 117.3, 112.2, 591.3, 755.2], ["10-08 14:12:30", 1246.2, 91.2, 112.0, 604.3, 755.0], ["10-08 17:12:31", 1213.4, 119.3, 111.9, 616.4, 755.0], ["10-08 20:42:30", 1213.5, 111.2, 111.9, 630.4, 754.9], ["10-08 23:42:31", 1182.2, 130.9, 111.9, 642.6, 754.9], ["10-09 03:12:30", 1181.5, 89.9, 111.8, 656.5, 754.9], ["10-09 06:12:31", 1182.0, 87.3, 111.6, 668.6, 755.1], ["10-09 09:35:47", 1152.4, 110.0, 111.5, 683.2, 755.1], ["10-09 10:42:01", 665.6, 200.3, 110.7, 705.3, 397.0]], "eru": ["10-06 07:42:30", "10-06 08:12:30", "10-06 08:42:30", "10-06 09:12:30", "10-06 09:42:30", "10-06 10:12:30", "10-06 10:42:30", "10-06 11:12:30", "10-06 11:42:30", "10-06 12:12:30", "10-06 12:42:30", "10-06 13:12:30", "10-06 13:42:30", "10-06 14:12:30", "10-06 14:42:30", "10-06 15:12:30", "10-06 15:42:30", "10-06 16:12:30", "10-06 16:42:30", "10-06 17:12:30", "10-06 17:42:30", "10-06 18:12:30", "10-06 18:42:30", "10-06 19:12:30", "10-06 19:42:30", "10-06 20:12:30", "10-06 20:42:30", "10-06 21:12:30", "10-06 21:42:30", "10-06 22:12:30", "10-06 22:42:30", "10-06 23:12:30", "10-06 23:42:30", "10-07 00:12:30", "10-07 00:42:30", "10-07 01:12:30", "10-07 01:42:30", "10-07 02:12:30", "10-07 02:42:30", "10-07 03:12:30", "10-07 03:42:30", "10-07 04:12:30", "10-07 04:42:30", "10-07 05:12:30", "10-07 05:42:30", "10-07 06:12:30", "10-07 06:42:30", "10-07 07:12:30", "10-07 07:42:30", "10-07 08:12:30", "10-07 08:42:30", "10-07 09:12:30", "10-07 09:42:30", "10-07 10:12:30", "10-07 10:42:30", "10-07 11:12:30", "10-07 11:42:30", "10-07 12:12:30", "10-07 12:42:30", "10-07 13:12:30", "10-07 13:42:30", "10-07 14:12:30", "10-07 14:42:30", "10-07 15:12:30", "10-07 15:42:30", "10-07 16:12:30", "10-07 16:42:30", "10-07 17:12:30", "10-07 17:42:30", "10-07 18:12:30", "10-07 18:42:30", "10-07 19:12:30", "10-07 19:42:30", "10-07 20:12:30", "10-07 20:42:30", "10-07 21:12:30", "10-07 21:42:30", "10-07 22:12:30", "10-07 22:42:30", "10-07 23:12:30", "10-07 23:42:30", "10-08 00:12:30", "10-08 00:42:30", "10-08 01:12:30", "10-08 01:42:30", "10-08 02:12:30", "10-08 02:42:30", "10-08 03:12:30", "10-08 03:42:30", "10-08 04:12:30", "10-08 04:42:30", "10-08 05:12:30", "10-08 05:42:30", "10-08 06:12:30", "10-08 06:42:30", "10-08 07:12:30", "10-08 07:42:30", "10-08 08:12:30", "10-08 08:42:30", "10-08 09:12:30", "10-08 09:42:30", "10-08 10:12:30", "10-08 10:42:30", "10-08 11:12:30", "10-08 11:42:30", "10-08 12:12:30", "10-08 12:42:30", "10-08 13:12:30", "10-08 13:42:30", "10-08 14:12:30", "10-08 14:42:30", "10-08 15:12:30", "10-08 15:42:30", "10-08 16:12:30", "10-08 16:42:30", "10-08 17:12:30", "10-08 17:42:30", "10-08 18:12:30", "10-08 18:42:30", "10-08 19:12:30", "10-08 19:42:30", "10-08 20:12:30", "10-08 20:42:30", "10-08 21:12:30", "10-08 21:42:30", "10-08 22:12:30", "10-08 22:42:30", "10-08 23:12:30", "10-08 23:42:30", "10-09 00:12:30", "10-09 00:42:30", "10-09 01:12:30", "10-09 01:42:30", "10-09 02:12:30", "10-09 02:42:30", "10-09 03:12:30", "10-09 03:42:30", "10-09 04:12:30", "10-09 04:42:30", "10-09 05:12:30", "10-09 05:42:30", "10-09 06:12:30", "10-09 06:42:30", "10-09 07:12:30", "10-09 07:42:30", "10-09 08:12:30", "10-09 08:42:30", "10-09 09:12:30", "10-09 09:42:30", "10-09 10:12:30", "10-09 10:36:21", "10-09 10:36:21"], "hours": {"10-06 07": 2465, "10-05 21": 950, "10-06 08": 15, "10-06 09": 15, "10-06 10": 16, "10-06 11": 15, "10-06 12": 14, "10-06 13": 21, "10-06 14": 14, "10-06 15": 15, "10-06 16": 13, "10-06 17": 16, "10-06 18": 14, "10-06 19": 22, "10-06 20": 16, "10-06 21": 13, "10-06 22": 24, "10-06 23": 16, "10-07 00": 15, "10-07 01": 18, "10-07 02": 15, "10-07 03": 15, "10-07 04": 17, "10-07 05": 16, "10-07 06": 19, "10-07 07": 38, "10-07 08": 17, "10-07 09": 16, "10-07 10": 15, "10-07 11": 17, "10-07 12": 13, "10-07 13": 18, "10-07 14": 14, "10-07 15": 16, "10-07 16": 15, "10-07 17": 13, "10-07 18": 17, "10-07 19": 18, "10-07 20": 17, "10-07 21": 15, "10-07 22": 25, "10-07 23": 13, "10-08 00": 15, "10-08 01": 19, "10-08 02": 16, "10-08 03": 15, "10-08 04": 16, "10-08 05": 15, "10-08 06": 17, "10-08 07": 40, "10-08 08": 15, "10-08 09": 15, "10-08 10": 15, "10-08 11": 18, "10-08 12": 14, "10-08 13": 18, "10-08 14": 13, "10-08 15": 15, "10-08 16": 16, "10-08 17": 16, "10-08 18": 14, "10-08 19": 16, "10-08 20": 15, "10-08 21": 18, "10-08 22": 24, "10-08 23": 16, "10-09 00": 14, "10-09 01": 18, "10-09 02": 16, "10-09 03": 16, "10-09 04": 18, "10-09 05": 13, "10-09 06": 18, "10-09 07": 39, "10-09 08": 14, "10-09 09": 269, "10-09 10": 9800}};
+const NS = 'http://www.w3.org/2000/svg';
+const root = document.getElementById('root'), tip = document.getElementById('tip');
+function T(s){ // "10-06 07:14:43" or "10-06 07:14" -> hours since boot (wall clock, naive)
+  const m = s.match(/^(\d\d)-(\d\d) (\d\d):(\d\d)(?::(\d\d))?/);
+  return Date.UTC(2026, +m[1]-1, +m[2], +m[3], +m[4], +(m[5]||0))/3600000;
+}
+const BOOT = T('10-06 07:14:43'), NOW = T('10-09 10:42:01'), SPAN = NOW - BOOT;
+const fmtH = h => { const d=Math.floor(h/24), r=h-d*24; return d+' d '+Math.round(r)+' h'; };
+function el(tag, attrs, parent, text){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function showTip(ev, html){
+  tip.innerHTML = html; tip.style.display = 'block';
+  const r = root.getBoundingClientRect();
+  let x = ev.clientX - r.left + 14, y = ev.clientY - r.top + 14;
+  if (x > r.width - 320) x = ev.clientX - r.left - 314;
+  tip.style.left = x+'px'; tip.style.top = y+'px';
+}
+const hideTip = () => tip.style.display = 'none';
+function hover(node, html){ node.addEventListener('mousemove', e => showTip(e, html)); node.addEventListener('mouseleave', hideTip); }
+const sty = (e, o) => { for (const k in o) e.style.setProperty(k, o[k]); return e; };
+
+// ---------- data prep ----------
+const mem = DATA.mem.map(r => ({t:T(r[0]), label:r[0], cached:r[1], free:r[2], zram:r[3], kernel:r[4], native:r[5]}));
+const lastPoint = mem[mem.length-1];            // taken while the bugreport was running
+const fitPts = mem.slice(0, -1);
+const n = fitPts.length, mx = fitPts.reduce((a,p)=>a+p.t,0)/n, my = fitPts.reduce((a,p)=>a+p.kernel,0)/n;
+let sxx=0, sxy=0; fitPts.forEach(p => { sxx+=(p.t-mx)**2; sxy+=(p.t-mx)*(p.kernel-my); });
+const slopeH = sxy/sxx, icpt = my - slopeH*mx;       // MiB per hour
+const perDay = slopeH*24;
+const fit = t => icpt + slopeH*t;
+const kFirst = fitPts[0].kernel, kLast = fitPts[fitPts.length-1].kernel;
+const uptimeAt = p => p.t - BOOT;
+
+// ---------- tiles ----------
+document.getElementById('tiles').innerHTML = [
+  ['Uptime at capture', '3 d 3 h 27 m', 'Booted 10-06 07:14:43 after the hang_detect reboot'],
+  ['Kernel memory', '+' + Math.round(kLast-kFirst) + ' MiB', 'From ' + Math.round(kFirst) + ' to ' + Math.round(kLast) + ' MiB across the idle days (~' + Math.round(perDay) + ' MiB/day)'],
+  ['Touch input logged', '0 for 74 h', 'None between boot and 10-09 09:36, when you picked it up'],
+  ['Background broadcasts', '152', 'com.ifit.eru, one every 30 min, flagged as "non-protected broadcast null"']
+].map(t => '<div class="tile"><div class="k">'+t[0]+'</div><div class="v">'+t[1]+'</div><div class="n">'+t[2]+'</div></div>').join('');
+
+// ---------- shared x scale ----------
+const X0 = 62, X1 = 880;
+const xs = t => X0 + (t - BOOT)/SPAN*(X1-X0);
+function midnights(){ const a=[]; for (let d=7; d<=9; d++) a.push(T('10-0'+d+' 00:00')); return a; }
+function xAxis(svg, y, withGrid, gTop){
+  el('line',{x1:X0,x2:X1,y1:y,y2:y,stroke:'var(--axis)'},svg);
+  const ticks = [BOOT].concat(midnights());
+  ticks.forEach((t,i) => {
+    const x = xs(t);
+    if (withGrid && i>0) el('line',{x1:x,x2:x,y1:gTop,y2:y,stroke:'var(--grid)'},svg);
+    el('line',{x1:x,x2:x,y1:y,y2:y+4,stroke:'var(--axis)'},svg);
+    const lab = i===0 ? '10-06 07:15 (boot)' : '10-0'+(6+i)+' 00:00';
+    el('text',{x:x,y:y+17,'text-anchor':i===0?'start':'middle',class:'m'},svg,lab);
+  });
+  const xe = xs(NOW);
+  el('line',{x1:xe,x2:xe,y1:y,y2:y+4,stroke:'var(--axis)'},svg);
+  el('text',{x:xe+4,y:y+17,'text-anchor':'start',class:'m'},svg,'10-09 10:42');
+}
+
+// ---------- A: memory ----------
+(function(){
+  const svg = document.getElementById('svgA'), Y0=20, Y1=250, YMAX=1500;
+  const ys = v => Y1 - v/YMAX*(Y1-Y0);
+  for (let v=0; v<=YMAX; v+=250){
+    el('line',{x1:X0,x2:X1,y1:ys(v),y2:ys(v),stroke:'var(--grid)'},svg);
+    el('text',{x:X0-8,y:ys(v)+4,'text-anchor':'end',class:'m'},svg,v);
+  }
+  el('text',{x:X0-8,y:Y0-8,'text-anchor':'end',class:'m'},svg,'MiB');
+  xAxis(svg, Y1, true, Y0);
+  const series = [
+    ['kernel','var(--s2)','Kernel',3],
+    ['cached','var(--s1)','Cached apps',2],
+    ['free','var(--s3)','Free',2]
+  ];
+  // linear fit
+  el('line',{x1:xs(fitPts[0].t),y1:ys(fit(fitPts[0].t)),x2:xs(fitPts[fitPts.length-1].t),y2:ys(fit(fitPts[fitPts.length-1].t)),stroke:'var(--s2)','stroke-width':1.5,'stroke-dasharray':'5 4',opacity:.75},svg);
+  series.forEach(([k,c,name,w]) => {
+    const d = fitPts.map((p,i) => (i?'L':'M')+xs(p.t).toFixed(1)+' '+ys(p[k]).toFixed(1)).join(' ');
+    el('path',{d:d,fill:'none',stroke:c,'stroke-width':w,'stroke-linejoin':'round'},svg);
+    // dashed hop to the bugreport-time sample
+    const a = fitPts[fitPts.length-1];
+    el('line',{x1:xs(a.t),y1:ys(a[k]),x2:xs(lastPoint.t),y2:ys(lastPoint[k]),stroke:c,'stroke-width':1.5,'stroke-dasharray':'3 3',opacity:.8},svg);
+    fitPts.forEach(p => {
+      const dot = el('circle',{cx:xs(p.t),cy:ys(p[k]),r:3.5,fill:c,stroke:'var(--surface-1)','stroke-width':2},svg);
+      hover(dot, pointTip(p));
+    });
+    const lp = el('circle',{cx:xs(lastPoint.t),cy:ys(lastPoint[k]),r:4,fill:'var(--surface-1)',stroke:c,'stroke-width':2},svg);
+    hover(lp, pointTip(lastPoint, true));
+    // direct label, placed right of the last point
+    const lastFit = fitPts[fitPts.length-1][k];
+    el('text',{x:X1+8,y:ys(fitPts[fitPts.length-1][k])+4,class:'p','font-weight':600},svg,name);
+  });
+  function pointTip(p, bug){
+    return '<b>'+p.label+'</b> (uptime '+fmtH(uptimeAt(p))+')<br>Kernel '+p.kernel.toFixed(0)+' MiB<br>Cached apps '+p.cached.toFixed(0)+' MiB<br>Free '+p.free.toFixed(0)+' MiB'
+      + (bug ? '<br><i>Sampled while the bugreport was running; its own memory use shifts these values.</i>' : '');
+  }
+  // annotations
+  const mid = (fitPts[3].t);
+  el('text',{x:xs(T('10-07 02:00')),y:ys(fit(T('10-07 02:00')))-14,class:'p'},svg,'about +'+perDay.toFixed(0)+' MiB per day');
+  const bx = xs(lastPoint.t);
+  el('text',{x:bx-6,y:ys(lastPoint.cached)-14,'text-anchor':'end',class:'m'},svg,'bugreport running (hollow marks)');
+  document.getElementById('lg-note').textContent = 'Hollow = sampled during the bugreport';
+})();
+
+// ---------- B: lanes ----------
+(function(){
+  const svg = document.getElementById('svgB');
+  const rows = [['System', 26],['Heartbeats', 62],['DND schedule', 98],['You', 134]];
+  const bandT = 10, bandB = 152;
+  // idle span
+  const ix0 = xs(BOOT), ix1 = xs(T('10-09 09:36'));
+  const band = el('rect',{x:ix0,y:bandT,width:ix1-ix0,height:bandB-bandT,fill:'var(--band)',rx:4},svg);
+  hover(band, '<b>No touch input logged</b><br>10-06 07:14 to 10-09 09:36 (74.4 h)');
+  el('text',{x:(ix0+ix1)/2,y:bandB-8,'text-anchor':'middle',class:'p','font-weight':600},svg,'74 h with no touch input logged');
+  rows.forEach(([name,y]) => {
+    el('text',{x:X0-8,y:y+4,'text-anchor':'end',class:'m'},svg,name);
+    el('line',{x1:X0,x2:X1,y1:y,y2:y,stroke:'var(--grid)'},svg);
+  });
+  // system: boot cluster
+  const bx = xs(BOOT);
+  const bd = el('circle',{cx:bx+3,cy:26,r:5,fill:'var(--text-primary)',stroke:'var(--surface-1)','stroke-width':2},svg);
+  hover(bd, '<b>07:14:43 boot</b><br>07:14:50 stale clock stepped by NTP at 07:14:58<br>07:15:00 iFit apps (rivendell, eru, glassos) start<br>07:34:54 first memory sample: kernel '+Math.round(mem[0].kernel)+' MiB');
+  el('text',{x:bx+14,y:30,class:'p'},svg,'boot 07:14:43, apps up 07:15, clock fixed by NTP 07:14:58');
+  // heartbeat ticks (eru broadcast every 30 min)
+  DATA.eru.forEach(s => { const x = xs(T(s)); el('line',{x1:x,x2:x,y1:54,y2:70,stroke:'var(--s1)','stroke-width':1.4,opacity:.8},svg); });
+  const hb = el('rect',{x:X0,y:50,width:X1-X0,height:24,fill:'transparent'},svg);
+  hover(hb, '<b>com.ifit.eru</b> sends a "non-protected broadcast null" every 30 min, 152 times this boot (35, 48, 48, 25 per day). ActivityManager logs each as a WTF. Steady and unrelated to the memory growth.');
+  // DND ticks
+  ['10-06 22:00','10-07 07:00','10-07 22:00','10-08 07:00','10-08 22:00','10-09 07:00'].forEach(s => {
+    const x = xs(T(s)); const hr = s.slice(6,8);
+    const dnd = el('path',{d:'M'+x+' 90 l5 8 l-5 8 l-5 -8 z',fill:hr==='22'?'var(--text-secondary)':'var(--surface-1)',stroke:'var(--text-secondary)','stroke-width':1.5},svg);
+    hover(dnd, '<b>'+s+'</b><br>Do Not Disturb schedule '+(hr==='22'?'turns on':'turns off')+' (22:00 to 07:00, daily)');
+  });
+  // you
+  const hx0 = xs(T('10-09 09:35')), hx1 = xs(NOW);
+  const you = el('rect',{x:hx0,y:122,width:Math.max(hx1-hx0,6),height:24,rx:3,fill:'var(--s7)'},svg);
+  hover(you, '<b>10-09 09:35 to 10:42</b><br>USB cable plugged in 09:35:47, Settings opened 09:36, PM re-entry 10:33, debugging screens 10:35, bugreport 10:42. Expanded in panel D.');
+  el('text',{x:hx0-8,y:138,'text-anchor':'end',class:'p'},svg,'you at the tablet, 67 min (see D)');
+  xAxis(svg, 160, true, bandT);
+})();
+
+// ---------- C: log volume ----------
+(function(){
+  const svg = document.getElementById('svgC'), Y0=10, Y1=110;
+  const ys = v => Y1 - Math.log10(Math.max(v,1))/4*(Y1-Y0);
+  [1,10,100,1000,10000].forEach(v => {
+    el('line',{x1:X0,x2:X1,y1:ys(v),y2:ys(v),stroke:'var(--grid)'},svg);
+    el('text',{x:X0-8,y:ys(v)+4,'text-anchor':'end',class:'m'},svg,v>=1000?(v/1000)+'k':v);
+  });
+  const H = Object.assign({}, DATA.hours);
+  H['10-06 07'] += H['10-05 21'] || 0; delete H['10-05 21'];
+  const bw = (X1-X0)/SPAN*0.82;
+  Object.keys(H).sort().forEach(k => {
+    const t = T(k+':00'), v = H[k], x = xs(t);
+    const hot = v > 200;
+    const r = el('rect',{x:x,y:ys(v),width:Math.max(bw,1.5),height:Y1-ys(v),fill:hot?'var(--s7)':'var(--text-muted)',opacity:hot?1:.55},svg);
+    hover(r, '<b>'+k+':00</b><br>'+v.toLocaleString()+' log lines');
+  });
+  el('text',{x:xs(T('10-06 07:00'))+8,y:ys(3415)+4,class:'p'},svg,'boot hour');
+  el('text',{x:xs(T('10-09 09:00'))-6,y:ys(9800)+14,'text-anchor':'end',class:'p'},svg,'10-09 session, 9,800 lines in the last hour');
+  el('text',{x:xs(T('10-08 09:00')),y:ys(400),class:'m'},svg,'quiet baseline, about 15 lines an hour');
+  xAxis(svg, Y1, false, Y0);
+})();
+
+// ---------- D: zoom ----------
+(function(){
+  const svg = document.getElementById('svgD');
+  const Z0 = T('10-09 09:30'), Z1 = T('10-09 10:45');
+  const zx = t => X0 + (t - Z0)/(Z1 - Z0)*(X1 - X0);
+  const Y1 = 170, Y0 = 20;
+  // adbd per minute
+  const adbd = {'10:35':307,'10:36':963,'10:37':616,'10:38':563,'10:39':456,'10:40':890,'10:41':563,'10:42':32};
+  const ys = v => Y1 - v/1000*(Y1-Y0);
+  [0,250,500,750,1000].forEach(v => {
+    el('line',{x1:X0,x2:X1,y1:ys(v),y2:ys(v),stroke:'var(--grid)'},svg);
+    el('text',{x:X0-8,y:ys(v)+4,'text-anchor':'end',class:'m'},svg,v);
+  });
+  el('text',{x:X0,y:Y0-8,'text-anchor':'start',class:'m'},svg,'adbd lines/min');
+  const bw = (X1-X0)/(Z1-Z0)/60*0.8;
+  Object.keys(adbd).forEach(m => {
+    const t = T('10-09 '+m), r = el('rect',{x:zx(t),y:ys(adbd[m]),width:bw,height:Y1-ys(adbd[m]),fill:'var(--s7)'},svg);
+    hover(r, '<b>10-09 '+m+'</b><br>'+adbd[m]+' adbd log lines (USB FFS reconnect loop)');
+  });
+  // axis
+  el('line',{x1:X0,x2:X1,y1:Y1,y2:Y1,stroke:'var(--axis)'},svg);
+  for (let m=30; m<=75; m+=15){
+    const hh = m<60 ? '09:'+m : '10:'+String(m-60).padStart(2,'0'); const x = zx(T('10-09 '+hh));
+    el('line',{x1:x,x2:x,y1:Y1,y2:Y1+4,stroke:'var(--axis)'},svg);
+    el('text',{x:x,y:Y1+17,'text-anchor':'middle',class:'m'},svg,hh);
+  }
+  // events with staggered labels
+  const ev = [
+    ['09:35:47','USB cable plugged in','"Charging this device via USB" notification; DeviceAsWebcam starts', 0],
+    ['09:36:27','Settings opened, 20 touches in 26 s','First touch input since boot', 1],
+    ['10:33:15','Launcher / PM re-entry','com.ifit.launcher MainActivity to top, then launcher3 at 10:34:06', 0],
+    ['10:35:42','Wireless debugging screen','ADB_WIFI_ENABLED=false; adbd persist.adb.watchdog set; USB loop begins', 1],
+    ['10:42:01','Bugreport','dumpstate runs; memory sample #25 taken during it', 2]
+  ];
+  const levels = [214, 232, 250];
+  const used = [[],[],[]];
+  ev.forEach(e => {
+    const x = zx(T('10-09 '+e[0]));
+    el('line',{x1:x,x2:x,y1:Y0,y2:Y1,stroke:'var(--text-secondary)','stroke-dasharray':'2 3',opacity:.7},svg);
+    const d = el('circle',{cx:x,cy:Y1,r:4.5,fill:'var(--text-primary)',stroke:'var(--surface-1)','stroke-width':2},svg);
+    hover(d, '<b>10-09 '+e[0]+'</b> '+e[1]+'<br>'+e[2]);
+    const anchor = x > X1 - 150 ? 'end' : 'start';
+    el('text',{x:anchor==='end'?x-6:x+6,y:levels[e[3]],'text-anchor':anchor,class:'p'},svg,e[0].slice(0,5)+'  '+e[1]);
+  });
+  el('text',{x:zx(T('10-09 09:50')),y:60,'text-anchor':'middle',class:'m'},svg,'no adbd activity before 10:35');
+})();
+
+// ---------- cards ----------
+const kd = (mem[mem.length-2].kernel - mem[0].kernel);
+document.getElementById('cards').innerHTML = [
+  ['The leak shows up in a second, independent counter', 'ActivityManager logs a kernel-memory figure every ~3 h. It rises from '+Math.round(kFirst)+' to '+Math.round(kLast)+' MiB over the idle days (~'+perDay.toFixed(0)+' MiB/day), essentially the same as the ~92 to 96 MiB/day from slab accounting, from a different counter and a different method. Cached apps fall about '+Math.round(fitPts[0].cached-fitPts[fitPts.length-1].cached)+' MiB over the same time, which is where the kernel\'s share is coming from.'],
+  ['Cheap sampler, no root, no bugreport', 'This series is readable any time with <code>adb logcat -b events -d | grep am_meminfo</code>. The ring holds the whole boot, so one pull at +24 h and +48 h gives the trend directly. On this counter, expect kernel near '+Math.round(fit(NOW-BOOT+BOOT+24))+' MiB at +24 h (fit extended by one day, an estimate).'],
+  ['It was idle, genuinely', 'No touch input from boot until 09:36 on 10-09, no app launches (the only process starts are boot and the 10-09 session), and about 15 log lines an hour in between. The tablet ran its own housekeeping and nothing else.'],
+  ['The USB ADB loop is not background noise', 'The ~4,400 adbd lines are all inside 10:35 to 10:42 on 10-09, a USB FFS bind-timeout loop that started when the debugging screens were opened and ran until the bugreport. It does not run during idle time. (My earlier "all dated 10-09" was true but understated how narrow the window is.)'],
+  ['A 30-minute heartbeat from com.ifit.eru', 'Every 30 min, :12:30 and :42:30, eru sends a broadcast ActivityManager flags as an unprotected "null" action. 152 times in 75 h. It is regular, cheap and unrelated to the leak, but it is a framework WTF each time and worth a note to the app team.'],
+  ['The clock has no RTC', 'At every boot the first ~20 s carry a stale saved time (here 10-05 21:38) until NTP steps it at 07:14:58. Anyone grepping logs by timestamp across a reboot will see a nine-hour jump backwards at the start. It is not a second boot.']
+].map(c => '<div class="card"><h3>'+c[0]+'</h3><p>'+c[1]+'</p></div>').join('');
+
+// ---------- table ----------
+document.getElementById('tbtn').addEventListener('click', function(){
+  const box = document.getElementById('tbl'), open = this.getAttribute('aria-expanded')==='true';
+  this.setAttribute('aria-expanded', String(!open));
+  this.textContent = open ? 'Show memory samples as a table' : 'Hide table';
+  if (open){ box.innerHTML=''; return; }
+  box.innerHTML = '<table><thead><tr><th>Sample time</th><th>Uptime</th><th>Kernel MiB</th><th>Cached MiB</th><th>Free MiB</th><th>Zram MiB</th></tr></thead><tbody>' +
+    mem.map(p => '<tr><td>'+p.label+(p===lastPoint?' (during bugreport)':'')+'</td><td>'+fmtH(uptimeAt(p))+'</td><td>'+p.kernel.toFixed(0)+'</td><td>'+p.cached.toFixed(0)+'</td><td>'+p.free.toFixed(0)+'</td><td>'+p.zram.toFixed(0)+'</td></tr>').join('') + '</tbody></table>';
+});
+</script>
+</body>
+</html>
